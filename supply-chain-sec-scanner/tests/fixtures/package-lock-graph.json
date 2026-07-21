@@ -1,0 +1,44 @@
+{
+  "name": "example-app",
+  "version": "1.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "example-app",
+      "version": "1.0.0",
+      "dependencies": {
+        "chalk": "^5.3.0",
+        "pkg-a": "^1.0.0",
+        "pkg-b": "^1.0.0"
+      }
+    },
+    "node_modules/chalk": {
+      "version": "5.3.0",
+      "dependencies": {
+        "ansi-styles": "^6.2.1"
+      }
+    },
+    "node_modules/ansi-styles": {
+      "version": "6.2.1"
+    },
+    "node_modules/pkg-a": {
+      "version": "1.0.0",
+      "dependencies": {
+        "shared-lib": "^1.0.0"
+      }
+    },
+    "node_modules/pkg-a/node_modules/shared-lib": {
+      "version": "1.0.0"
+    },
+    "node_modules/pkg-b": {
+      "version": "1.0.0",
+      "dependencies": {
+        "shared-lib": "^2.0.0"
+      }
+    },
+    "node_modules/pkg-b/node_modules/shared-lib": {
+      "version": "2.0.0"
+    }
+  }
+}

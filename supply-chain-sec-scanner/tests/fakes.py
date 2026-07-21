@@ -26,8 +26,10 @@ class FakeSession:
         self._responses = list(responses)
         self.calls = []
 
-    def request(self, method, url, json=None, timeout=None):
-        self.calls.append({"method": method, "url": url, "json": json, "timeout": timeout})
+    def request(self, method, url, json=None, headers=None, timeout=None):
+        self.calls.append(
+            {"method": method, "url": url, "json": json, "headers": headers, "timeout": timeout}
+        )
         response = self._responses.pop(0)
         if isinstance(response, Exception):
             raise response

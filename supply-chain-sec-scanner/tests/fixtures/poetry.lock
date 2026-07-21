@@ -8,6 +8,9 @@ optional = false
 python-versions = ">=3.7"
 files = []
 
+[package.dependencies]
+certifi = ">=2017.4.17"
+
 [[package]]
 name = "certifi"
 version = "2024.6.2"

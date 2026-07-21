@@ -1,7 +1,8 @@
 """Generic on-disk JSON cache, keyed by an arbitrary string.
 
-Used by the OSV client to avoid re-querying the API for a package version
-(or a vulnerability ID) it's already looked up in a previous run.
+Shared by every API client that needs to avoid re-querying the network
+for something it's already looked up in a previous run (OSV vuln records,
+PyPI/npm registry metadata).
 """
 
 import hashlib

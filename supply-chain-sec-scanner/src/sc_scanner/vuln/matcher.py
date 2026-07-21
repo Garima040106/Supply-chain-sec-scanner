@@ -24,10 +24,9 @@ disjoint vulnerable windows in one range will only surface the last one.
 That's rare in practice for the ecosystems this scanner targets.
 """
 
-import re
 from typing import Any
 
-from sc_scanner.models import Dependency
+from sc_scanner.models import Dependency, normalize_pypi_name
 from sc_scanner.vuln.client import OSVClient
 from sc_scanner.vuln.models import (
     OSV_ECOSYSTEM_NAMES,
@@ -85,14 +84,14 @@ def _parse_severities(raw: dict[str, Any]) -> tuple[Severity, ...]:
 
 def _parse_affected_ranges(raw: dict[str, Any], dependency: Dependency) -> tuple[AffectedRange, ...]:
     ecosystem_name = OSV_ECOSYSTEM_NAMES[dependency.ecosystem]
-    target_name = _normalize_name(dependency.name)
+    target_name = normalize_pypi_name(dependency.name)
 
     ranges: list[AffectedRange] = []
     for affected in raw.get("affected", []):
         package = affected.get("package", {})
         if package.get("ecosystem") != ecosystem_name:
             continue
-        if _normalize_name(package.get("name", "")) != target_name:
+        if normalize_pypi_name(package.get("name", "")) != target_name:
             continue
 
         for range_entry in affected.get("ranges", []):
@@ -111,6 +110,3 @@ def _parse_affected_ranges(raw: dict[str, Any], dependency: Dependency) -> tuple
 
     return tuple(ranges)
 
-
-def _normalize_name(name: str) -> str:
-    return re.sub(r"[-_.]+", "-", name).lower()

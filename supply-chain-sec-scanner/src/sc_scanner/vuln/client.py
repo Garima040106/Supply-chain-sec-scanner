@@ -20,21 +20,20 @@ handling it would mean re-querying per affected dependency. Results are
 simply whatever fit in the first page.
 """
 
-import time
 from pathlib import Path
 from typing import Any
 
 import requests
 
+from sc_scanner.cache import DiskCache
+from sc_scanner.http import HttpError, request_json
 from sc_scanner.models import Dependency
-from sc_scanner.vuln.cache import DiskCache
 from sc_scanner.vuln.models import OSV_ECOSYSTEM_NAMES
 
 API_BASE = "https://api.osv.dev/v1"
 DEFAULT_CACHE_DIR = Path.home() / ".cache" / "sc-scanner" / "osv"
 
 _BATCH_CHUNK_SIZE = 1000
-_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 class OSVClientError(Exception):
@@ -91,39 +90,18 @@ class OSVClient:
         return data
 
     def _request_json(self, method: str, url: str, json_body: dict | None) -> dict[str, Any]:
-        last_error: Exception = OSVClientError(f"no attempts made for {url}")
-
-        for attempt in range(self._max_retries + 1):
-            if attempt > 0:
-                time.sleep(self._backoff_seconds * (2 ** (attempt - 1)))
-
-            try:
-                response = self._session.request(
-                    method, url, json=json_body, timeout=self._timeout
-                )
-            except requests.exceptions.RequestException as exc:
-                last_error = exc
-                continue
-
-            if response.status_code == 200:
-                return response.json()
-
-            if response.status_code not in _RETRYABLE_STATUS_CODES:
-                response.raise_for_status()
-
-            if response.status_code == 429:
-                retry_after = response.headers.get("Retry-After")
-                if retry_after is not None:
-                    time.sleep(float(retry_after))
-
-            last_error = requests.exceptions.HTTPError(
-                f"{response.status_code} {response.reason} from {url}",
-                response=response,
+        try:
+            return request_json(
+                self._session,
+                method,
+                url,
+                json_body=json_body,
+                timeout=self._timeout,
+                max_retries=self._max_retries,
+                backoff_seconds=self._backoff_seconds,
             )
-
-        raise OSVClientError(
-            f"OSV API request to {url} failed after {self._max_retries + 1} attempts"
-        ) from last_error
+        except HttpError as exc:
+            raise OSVClientError(str(exc)) from exc
 
 
 def _to_osv_query(dependency: Dependency) -> dict[str, Any]:

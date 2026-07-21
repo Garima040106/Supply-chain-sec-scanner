@@ -1,4 +1,4 @@
-from sc_scanner.vuln.cache import DiskCache
+from sc_scanner.cache import DiskCache
 
 
 def test_returns_none_for_missing_key(tmp_path):

@@ -33,10 +33,15 @@ parser -> graph builder -> vuln matcher -> heuristics -> risk scorer -> reporter
   dependency lists from every manifest found in a project and links them
   into a graph: which package pulls in which, direct vs. transitive, and
   resolves duplicate/conflicting versions across manifests.
-- **vuln matcher** (`src/sc_scanner/vuln/`, *planned*) — For every node in
-  the graph, queries a vulnerability data source (OSV.dev API and/or a
-  local cache) and attaches known CVEs/advisories to that exact
-  name+version+ecosystem.
+- **vuln matcher** (`src/sc_scanner/vuln/`) — Queries the OSV.dev API for
+  each `(ecosystem, name, version)` and attaches known CVEs/advisories.
+  OSV's server-side batch query does the affected-version-range
+  evaluation; this stage only parses the matched records back out (CVE
+  IDs, severity, fix ranges) and caches every response to disk. See the
+  module docstring in `matcher.py` for why range matching isn't
+  reimplemented locally. Currently operates on a flat dependency list
+  (from the parser stage directly) since the graph builder doesn't exist
+  yet; once it does, this stage will run against graph nodes instead.
 - **heuristics** (`src/sc_scanner/heuristics/`, *planned*) — Independent of
   known-CVE data. Runs checks like: edit-distance/typosquat detection
   against popular package names, presence of install-time scripts,
@@ -54,12 +59,17 @@ the same vocabulary without importing from each other's internals.
 
 ## Current status
 
-Implemented: package skeleton, CLI entrypoint, and parsers for
+Implemented: package skeleton, CLI entrypoint, parsers for
 `package-lock.json` (npm), `requirements.txt` (pip), and `poetry.lock`
-(Poetry), each with unit tests against fixture files. The `scan` CLI
-command currently only discovers manifests under a path and prints the
-parsed dependency list — graph building, vuln matching, heuristics,
-scoring, and HTML reporting are not implemented yet.
+(Poetry), and an OSV.dev vulnerability matcher (`src/sc_scanner/vuln/`) —
+each with unit tests (parsers against fixture files, the vuln matcher
+against mocked API responses). The vuln matcher is not yet wired into the
+`scan` CLI command; it's exercised directly via `sc_scanner.vuln.matcher.match()`
+for now, since running it meaningfully over a whole project really wants
+the graph builder in place first. The `scan` CLI command currently only
+discovers manifests under a path and prints the parsed dependency list —
+graph building, heuristics, scoring, and HTML reporting are not
+implemented yet.
 
 ## File layout
 
@@ -79,11 +89,17 @@ supply-chain-sec-scanner/
 │       │   ├── pip.py          # requirements.txt (pinned "==" entries)
 │       │   └── poetry.py       # poetry.lock (TOML, [[package]] tables)
 │       ├── graph/              # [planned] dependency graph builder
-│       ├── vuln/                # [planned] OSV/GHSA vulnerability matching
+│       ├── vuln/
+│       │   ├── __init__.py
+│       │   ├── models.py       # Severity, AffectedRange, Vulnerability, MatchResult
+│       │   ├── cache.py        # generic on-disk JSON cache (DiskCache)
+│       │   ├── client.py       # OSVClient: querybatch + vulns/{id}, retries, caching
+│       │   └── matcher.py      # match(dependencies) -> list[MatchResult]
 │       ├── heuristics/          # [planned] typosquat / install-script / anomaly checks
 │       ├── scoring/             # [planned] risk scorer combining vuln + heuristic signals
 │       └── report/              # [planned] CLI table + HTML report renderers
 └── tests/
+    ├── fakes.py                 # FakeSession/FakeResponse test doubles for OSV client tests
     ├── fixtures/
     │   ├── package-lock.json
     │   ├── requirements.txt
@@ -91,7 +107,11 @@ supply-chain-sec-scanner/
     ├── test_npm_parser.py
     ├── test_pip_parser.py
     ├── test_poetry_parser.py
-    └── test_cli.py
+    ├── test_cli.py
+    ├── test_disk_cache.py
+    ├── test_osv_client.py
+    ├── test_vuln_matcher.py
+    └── test_vuln_models.py
 ```
 
 ## Tooling
@@ -106,6 +126,16 @@ supply-chain-sec-scanner/
   `pyproject.toml`).
 - Python 3.11+ is required (the poetry.lock parser uses the stdlib
   `tomllib`, added in 3.11).
+- **Vulnerability data**: [OSV.dev](https://osv.dev) API. Responses are
+  cached to disk at `~/.cache/sc-scanner/osv/` by default (configurable
+  via `OSVClient(cache_dir=...)`) so re-scanning a project doesn't re-hit
+  the network. Delete that directory to force fresh lookups.
+
+## Notes for future sessions
+
+- This file is intentionally listed in `.gitignore` and untracked — it's
+  local Claude Code context, not project documentation for humans. Don't
+  be alarmed that `git status` shows it as untracked; that's expected.
 
 ## Conventions
 

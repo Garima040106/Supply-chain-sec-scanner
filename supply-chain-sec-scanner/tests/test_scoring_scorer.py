@@ -50,7 +50,7 @@ def test_maxed_out_heuristics_alone_do_not_reach_high_tier():
     # see scorer.py's module docstring for why.
     risk = score_package(DEP, (), _every_signal_maxed())
 
-    assert risk.heuristic_assessment.score == 1.0
+    assert risk.heuristic_assessment.score == pytest.approx(1.0)
     assert risk.combined_score == pytest.approx(HEURISTIC_WEIGHT)
     assert risk.tier != "HIGH"
 
@@ -67,7 +67,7 @@ def test_cve_plus_heuristics_combine_higher_than_either_alone():
 def test_combined_score_never_exceeds_one():
     risk = score_package(DEP, (_critical_vuln(),), _every_signal_maxed())
 
-    assert risk.combined_score == 1.0
+    assert risk.combined_score == pytest.approx(1.0)
 
 
 def test_introduction_path_is_carried_through_untouched():

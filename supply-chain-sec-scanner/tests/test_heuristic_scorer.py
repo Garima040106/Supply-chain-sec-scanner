@@ -1,11 +1,15 @@
+import pytest
+
 from sc_scanner.heuristics.models import Signal, SignalType
 from sc_scanner.heuristics.scorer import WEIGHTS, combine
 
 
 def test_weights_sum_to_one():
     # A package hitting every signal at maximum severity should top out
-    # at 1.0, not pile up past it.
-    assert sum(WEIGHTS.values()) == 1.0
+    # at 1.0, not pile up past it. Summing several floats isn't exact
+    # (0.35+0.3+0.15+0.1+0.1 lands a hair under 1.0 on Python <3.12,
+    # which made sum() more precise for floats) - approx, not ==.
+    assert sum(WEIGHTS.values()) == pytest.approx(1.0)
 
 
 def test_no_signals_scores_zero():
@@ -48,7 +52,7 @@ def test_every_maxed_out_signal_together_caps_at_one():
 
     result = combine(signals)
 
-    assert result.score == 1.0
+    assert result.score == pytest.approx(1.0)
     assert result.tier == "HIGH"
 
 

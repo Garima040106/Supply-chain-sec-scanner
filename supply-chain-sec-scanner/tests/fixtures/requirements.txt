@@ -1,0 +1,15 @@
+# Core dependencies
+requests==2.31.0
+flask==3.0.3
+
+# Web server extras
+uvicorn[standard]==0.30.1
+
+# Version with an environment marker
+typing-extensions==4.12.2 ; python_version < "3.11"
+
+-r other-requirements.txt
+--index-url https://pypi.org/simple
+
+# Unpinned - version unknown, should be skipped
+click>=8.0

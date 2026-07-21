@@ -1,0 +1,11 @@
+{
+  "name": "vulnerable-npm-app",
+  "version": "1.0.0",
+  "description": "A deliberately outdated sample project for demoing sc-scan. Do not use these dependency versions in a real project.",
+  "dependencies": {
+    "lodash": "4.17.4",
+    "minimist": "0.0.8",
+    "lodahs": "0.0.1-security",
+    "left-pad": "1.3.0"
+  }
+}

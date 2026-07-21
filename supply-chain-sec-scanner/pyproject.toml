@@ -2,6 +2,7 @@
 name = "supply-chain-sec-scanner"
 version = "0.1.0"
 description = "Supply-chain security scanner: dependency graph, vulnerability matching, and malicious-package heuristics."
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "cvss>=3.6",
@@ -25,4 +26,8 @@ packages = ["src/sc_scanner"]
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.15.22",
 ]
+
+[tool.ruff]
+line-length = 100

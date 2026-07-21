@@ -135,7 +135,13 @@ Known gaps, by design (not oversights):
 ```
 supply-chain-sec-scanner/
 ├── CLAUDE.md
+├── README.md                    # the real project README (demo, install, threat model)
 ├── pyproject.toml              # uv-managed project config, deps, CLI entry point
+├── examples/
+│   └── vulnerable-npm-app/     # deliberately outdated project - the README's demo target
+│       ├── package.json
+│       ├── package-lock.json
+│       └── README.md
 ├── src/
 │   └── sc_scanner/
 │       ├── __init__.py
@@ -212,7 +218,8 @@ supply-chain-sec-scanner/
     ├── test_report_html.py
     ├── test_pipeline.py
     ├── test_metadata_heuristics.py
-    └── test_heuristic_scorer.py
+    ├── test_heuristic_scorer.py
+    └── test_examples.py         # regression guard for the README's demo project
 ```
 
 ## Tooling
@@ -221,10 +228,25 @@ supply-chain-sec-scanner/
   `uv sync` to create the virtualenv and install dependencies,
   `uv add <package>` to add a new dependency.
 - **Tests**: pytest, run with `uv run pytest`.
+- **Lint**: [ruff](https://docs.astral.sh/ruff/), run with `uv run ruff
+  check .` (config in `pyproject.toml`'s `[tool.ruff]`). Only lint is
+  enforced in CI, not `ruff format` — the codebase isn't currently
+  formatter-clean and reformatting wasn't in scope when CI was added.
+- **CI**: `.github/workflows/ci.yml` — note this lives at the *git repo
+  root* (`/home/garima/.github/`), not inside this project directory,
+  because that's the only place GitHub Actions will discover it (the
+  repo root here is the whole home directory - see the note on that
+  further down). It runs `uv sync`, `ruff check .`, and `pytest` with
+  `working-directory: supply-chain-sec-scanner` on every push/PR to `main`.
 - **CLI framework**: [Typer](https://typer.tiangolo.com/). The app object
   lives in `src/sc_scanner/cli.py`; run it locally with
   `uv run sc-scan scan <path>` (entry point registered in
   `pyproject.toml`).
+- **`examples/vulnerable-npm-app/`**: a deliberately outdated npm project
+  (real CVEs in `lodash`/`minimist`, a real historical typosquat name in
+  `lodahs`) used as the README's demo target and covered by
+  `tests/test_examples.py` as a cheap regression guard - if that test
+  starts failing, the demo command in the README is broken too.
 - Python 3.11+ is required (the poetry.lock parser uses the stdlib
   `tomllib`, added in 3.11).
 - **External data sources**: [OSV.dev](https://osv.dev) (vulnerabilities),

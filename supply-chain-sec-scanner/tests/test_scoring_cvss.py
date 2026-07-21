@@ -1,7 +1,7 @@
 import pytest
 
 from sc_scanner.scoring.cvss import normalize_severity, worst_severity_score
-from sc_scanner.vuln.models import AffectedRange, Severity, Vulnerability
+from sc_scanner.vuln.models import Severity, Vulnerability
 
 
 def _vuln(severities: tuple[Severity, ...], vuln_id: str = "GHSA-xxxx") -> Vulnerability:

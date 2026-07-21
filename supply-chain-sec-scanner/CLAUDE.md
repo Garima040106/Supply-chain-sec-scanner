@@ -3,7 +3,7 @@
 ## What this project does
 
 A CLI tool that scans a software project for supply-chain risk in its
-dependencies. Given a project directory, it:
+dependencies. Running `sc-scan scan <path>`:
 
 1. Reads dependency manifests/lockfiles (`package-lock.json`,
    `requirements.txt`, `poetry.lock`, ...).
@@ -15,7 +15,10 @@ dependencies. Given a project directory, it:
    side effects, etc.), anomalous age or popularity for a package that's
    suddenly a dependency.
 5. Combines both signals into a per-package and per-project risk score.
-6. Renders results as a CLI table and as a standalone HTML report.
+6. Renders results as a colored CLI table and a standalone HTML report.
+
+This is now a real, working end-to-end pipeline (see "Current status") —
+not just independently-implemented stages.
 
 ## Architecture
 
@@ -55,18 +58,14 @@ parser -> graph builder -> vuln matcher -> heuristics -> risk scorer -> reporter
   multi-source BFS from every root simultaneously, so it finds the
   globally shortest "root → ... → target" path — the "this CVE reaches
   you via A → B → C" explanation — and handles cycles safely via a
-  visited set. Not yet wired into the `scan` CLI command or the vuln
-  matcher; each graph-building function is used directly for now (see
-  "Current status").
+  visited set.
 - **vuln matcher** (`src/sc_scanner/vuln/`) — Queries the OSV.dev API for
   each `(ecosystem, name, version)` and attaches known CVEs/advisories.
   OSV's server-side batch query does the affected-version-range
   evaluation; this stage only parses the matched records back out (CVE
   IDs, severity, fix ranges) and caches every response to disk. See the
   module docstring in `matcher.py` for why range matching isn't
-  reimplemented locally. Currently takes a flat dependency list directly
-  (not graph nodes) — wiring it to run per-graph-node, and to look up
-  `shortest_path` for any match, is future work (see "Current status").
+  reimplemented locally.
 - **heuristics** (`src/sc_scanner/heuristics/`) — Independent of known-CVE
   data. Five independently-scored `Signal`s, combined by `scorer.py` into
   a weighted `RiskAssessment` (never a single collapsed verdict): edit-
@@ -76,44 +75,60 @@ parser -> graph builder -> vuln matcher -> heuristics -> risk scorer -> reporter
   package age, download counts, and (npm-only) maintainer-change
   detection (`metadata.py`). Every signal module's docstring documents
   its own false-positive tradeoffs in detail - read those before tuning
-  weights or thresholds. Not yet wired into the `scan` CLI command,
-  consistent with the vuln matcher and graph builder (see "Current
-  status").
-- **risk scorer** (`src/sc_scanner/scoring/`, *planned*) — Combines vuln
-  matches and heuristic signals per package into one risk score/severity,
-  and rolls those up into a project-level summary.
-- **reporter** (`src/sc_scanner/report/`, *planned*) — Renders the scored
-  results: a table for the terminal and a static HTML report.
+  weights or thresholds.
+- **risk scorer** (`src/sc_scanner/scoring/`) — Combines a package's
+  worst known-CVE severity (`cvss.py` normalizes CVSS vectors/qualitative
+  labels to 0.0-1.0, delegating the actual CVSS base-score math to the
+  `cvss` library for the same reason PEP 440/semver math is delegated
+  elsewhere) with its `RiskAssessment` from heuristics into one
+  `PackageRisk` (`scorer.py`, weighted 0.6 vuln / 0.4 heuristics -
+  confirmed CVEs count for more than probabilistic signals; see the
+  module docstring for the full reasoning). `score_project()` rolls
+  per-package scores up into a `ProjectRisk` - sorted, with per-tier
+  counts, scored as the single highest package score ("a project is only
+  as risky as its riskiest dependency").
+- **reporter** (`src/sc_scanner/report/`) — `cli_table.py` renders every
+  scanned package as a colored, risk-sorted Rich table. `html_report.py`
+  renders one self-contained HTML file (inline CSS, no external assets,
+  every piece of external-registry-sourced text HTML-escaped) with a
+  full detail card - CVEs, heuristic signals, introduction path - per
+  MEDIUM/HIGH tier package; LOW tier packages are summarized as a count
+  rather than each getting a card.
+- **pipeline** (`src/sc_scanner/pipeline.py`) — The only module that
+  imports across every stage above; `run_scan(path)` is what the `scan`
+  CLI command actually calls, and every network client it builds
+  (OSV/PyPI/npm registry/download stats) can be injected for testing.
 
 Shared, stage-agnostic data types (e.g. the `Dependency` record and the
-`Ecosystem` enum) live in `src/sc_scanner/models.py` so every stage speaks
-the same vocabulary without importing from each other's internals.
+`Ecosystem` enum) live in `src/sc_scanner/models.py`, and the LOW/MEDIUM/
+HIGH tier thresholds live in `src/sc_scanner/risk_tier.py` (used by both
+`heuristics.models.RiskAssessment` and `scoring.models.PackageRisk`/
+`ProjectRisk`, so "HIGH" means the same thing everywhere) — so every
+stage speaks the same vocabulary without importing from each other's
+internals.
 
 ## Current status
 
-Implemented: package skeleton, CLI entrypoint, parsers for
-`package-lock.json` (npm), `requirements.txt` (pip), and `poetry.lock`
-(Poetry); an OSV.dev vulnerability matcher (`src/sc_scanner/vuln/`); the
-dependency graph builder (`src/sc_scanner/graph/`) covering both lockfile
-parsing (npm, Poetry) and best-effort one-level resolution for plain
-manifests (`requirements.txt` via PyPI, `package.json` via the npm
-registry — `package.json` parsing exists only inside the graph package
-for now, not as a registered CLI-facing manifest parser); and the
-malicious-package heuristics layer (`src/sc_scanner/heuristics/`) —
-typosquat detection, install-script analysis, and metadata anomalies,
-combined into a weighted `RiskAssessment`. Every stage has unit tests
-(parsers/graph builders/heuristics against fixture files and crafted
-inputs, network clients against mocked responses); the whole pipeline has
-also been smoke-tested against the real OSV/PyPI/npm APIs at least once
-during development.
+The full pipeline is implemented and wired together: `sc-scan scan <path>`
+parses manifests, builds whatever dependency graph it can, matches known
+CVEs via OSV, runs the heuristic checks, scores everything, prints a
+colored risk-sorted CLI table, and writes a self-contained HTML report.
+Every stage has unit tests (parsers/graph builders/heuristics/scoring/
+report against fixture files and crafted inputs, network clients against
+mocked responses, `pipeline.py` itself against a full mocked scan), and
+the whole pipeline has also been smoke-tested against the real OSV/PyPI/
+npm APIs multiple times during development (most recently the fully
+wired CLI end-to-end, against a real known-vulnerable `lodash` version).
 
-Not yet done: the graph builder, vuln matcher, and heuristics layer
-aren't wired together or into the `scan` CLI command, which still only
-discovers manifests and prints the flat parsed dependency list. In
-particular, nothing yet calls `shortest_path` with a matched
-vulnerability's node as the target. Risk scoring that combines vuln
-matches *with* heuristic signals (as opposed to each producing its own
-separate score) and HTML reporting are also not implemented yet.
+Known gaps, by design (not oversights):
+- `package.json` parsing (for npm projects with no lockfile) exists only
+  inside `graph/npm_resolver.py`, not as a registered CLI-facing manifest
+  parser in `parsers/base.py` - so `scan` won't currently pick up a
+  lockfile-less npm project on its own.
+- The heuristic checks run for every dependency on every scan; there's
+  no flag to skip the network-heavy ones for a faster/lighter run.
+  Disk caching (per stage, under `~/.cache/sc-scanner/`) is what makes
+  re-scanning the same project fast, not reduced scope.
 
 ## File layout
 
@@ -125,7 +140,9 @@ supply-chain-sec-scanner/
 │   └── sc_scanner/
 │       ├── __init__.py
 │       ├── cli.py              # Typer app; `sc-scan scan <path>` command
+│       ├── pipeline.py         # run_scan(path) -> ProjectRisk; wires every stage together
 │       ├── models.py           # Dependency, Ecosystem — shared across all stages
+│       ├── risk_tier.py        # tier_for_score() — one LOW/MEDIUM/HIGH definition, shared
 │       ├── parsers/
 │       │   ├── __init__.py
 │       │   ├── base.py         # manifest filename -> parser registry, find_manifests()
@@ -156,10 +173,17 @@ supply-chain-sec-scanner/
 │       │   └── data/
 │       │       ├── top-npm-packages.txt   # ~1000 names, ranked (see typosquat.py docstring)
 │       │       └── top-pypi-packages.txt  # ~1000 names, ranked by real download counts
-│       ├── scoring/             # [planned] risk scorer combining vuln + heuristic signals
-│       └── report/              # [planned] CLI table + HTML report renderers
+│       ├── scoring/
+│       │   ├── __init__.py
+│       │   ├── models.py       # PackageRisk, ProjectRisk
+│       │   ├── cvss.py         # normalize_severity()/worst_severity_score() -> 0.0-1.0
+│       │   └── scorer.py       # score_package()/score_project(), documented weights
+│       └── report/
+│           ├── __init__.py
+│           ├── cli_table.py    # render_cli_table() — colored Rich table, every package
+│           └── html_report.py  # render_html_report() — self-contained HTML, risky packages only
 └── tests/
-    ├── fakes.py                 # FakeSession/FakeResponse test doubles for every API client
+    ├── fakes.py                 # FakeSession/FakeResponse/FakeRoutedSession for every API client
     ├── fixtures/
     │   ├── package-lock.json
     │   ├── package-lock-graph.json  # hoisting + a genuine version conflict, for graph tests
@@ -182,6 +206,11 @@ supply-chain-sec-scanner/
     ├── test_npm_resolver.py
     ├── test_typosquat.py
     ├── test_install_scripts.py
+    ├── test_scoring_cvss.py
+    ├── test_scoring_scorer.py
+    ├── test_report_cli_table.py
+    ├── test_report_html.py
+    ├── test_pipeline.py
     ├── test_metadata_heuristics.py
     └── test_heuristic_scorer.py
 ```
@@ -218,6 +247,14 @@ supply-chain-sec-scanner/
   `packaging` for PEP 440 (PyPI) version ordering/specifiers, `node-semver`
   for npm-style ranges (caret/tilde/hyphen/etc). Both are already
   full, well-tested implementations of genuinely fiddly logic.
+- Same reasoning for CVSS: `scoring/cvss.py` delegates base-score
+  computation to the `cvss` library rather than hand-rolling the v2/v3/v4
+  formulas. Its `base_score` is a `decimal.Decimal`, not a `float` - cast
+  explicitly (a real bug caught during development: dividing a Decimal by
+  a bare `float` literal raises `TypeError`).
+- **CLI table colors**: [Rich](https://rich.readthedocs.io/) (`report/cli_table.py`).
+  Typer already depends on it transitively; it's declared as a direct
+  dependency too since the CLI table relies on it directly.
 - The bundled top-package lists (`heuristics/data/`) are static snapshots,
   not live data — PyPI's is current download-count-ranked data
   (hugovk/top-pypi-packages); npm's is a 2019 dependency-graph-rank

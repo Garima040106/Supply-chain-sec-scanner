@@ -9,6 +9,8 @@ docstring for the false-positive tradeoffs behind its scoring.
 from dataclasses import dataclass
 from enum import Enum
 
+from sc_scanner.risk_tier import tier_for_score
+
 
 class SignalType(str, Enum):
     TYPOSQUAT = "typosquat"
@@ -44,8 +46,4 @@ class RiskAssessment:
 
     @property
     def tier(self) -> str:
-        if self.score >= 0.5:
-            return "HIGH"
-        if self.score >= 0.2:
-            return "MEDIUM"
-        return "LOW"
+        return tier_for_score(self.score)

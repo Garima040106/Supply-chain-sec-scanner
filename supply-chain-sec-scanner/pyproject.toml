@@ -4,9 +4,11 @@ version = "0.1.0"
 description = "Supply-chain security scanner: dependency graph, vulnerability matching, and malicious-package heuristics."
 requires-python = ">=3.11"
 dependencies = [
+    "cvss>=3.6",
     "node-semver>=0.9.1",
     "packaging>=26.2",
     "requests>=2.34.2",
+    "rich>=15.0.0",
     "typer>=0.12",
 ]
 

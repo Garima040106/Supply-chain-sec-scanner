@@ -55,10 +55,24 @@ class NpmRegistryClient:
         self._session = session or requests.Session()
 
     def get_package(self, name: str) -> dict[str, Any]:
-        """The full packument: dist-tags, and every version's manifest
-        (including its own "dependencies")."""
-        url = f"{REGISTRY_BASE}/{name}"
-        cached = self._cache.get(url)
+        """The abbreviated ("corgi") packument: dist-tags, and every
+        version's manifest (including its own "dependencies"). Cheap, but
+        deliberately strips fields like "time" and "_npmUser" that install
+        resolution doesn't need — use get_full_package() for those."""
+        return self._cached_get(f"{REGISTRY_BASE}/{name}", "abbreviated", _ABBREVIATED_HEADERS)
+
+    def get_full_package(self, name: str) -> dict[str, Any]:
+        """The full packument, including "time" (publish dates) and each
+        version's "_npmUser" (who published it) - used by the metadata
+        heuristics, not by dependency resolution."""
+        return self._cached_get(f"{REGISTRY_BASE}/{name}", "full", None)
+
+    def _cached_get(self, url: str, cache_variant: str, headers: dict | None) -> dict[str, Any]:
+        # Same URL, different Accept header, genuinely different response
+        # shape - the cache key must distinguish them or one variant would
+        # silently serve the other's cached data.
+        cache_key = f"{url}#{cache_variant}"
+        cached = self._cache.get(cache_key)
         if cached is not None:
             return cached
 
@@ -66,12 +80,12 @@ class NpmRegistryClient:
             self._session,
             "GET",
             url,
-            headers=_ABBREVIATED_HEADERS,
+            headers=headers,
             timeout=self._timeout,
             max_retries=self._max_retries,
             backoff_seconds=self._backoff_seconds,
         )
-        self._cache.set(url, data)
+        self._cache.set(cache_key, data)
         return data
 
 

@@ -5,11 +5,12 @@ import requests
 
 
 class FakeResponse:
-    def __init__(self, status_code=200, json_data=None, headers=None, reason=""):
+    def __init__(self, status_code=200, json_data=None, headers=None, reason="", content=b""):
         self.status_code = status_code
         self._json_data = json_data
         self.headers = headers or {}
         self.reason = reason
+        self.content = content
 
     def json(self):
         return self._json_data

@@ -1,4 +1,4 @@
-"""Shared retrying HTTP-JSON request helper.
+"""Shared retrying HTTP request helpers.
 
 Used by every external API client in this project (OSV, PyPI, npm
 registry) so retry/backoff/rate-limit handling lives in exactly one
@@ -6,7 +6,6 @@ place instead of being copy-pasted per client.
 """
 
 import time
-from typing import Any
 
 import requests
 
@@ -17,7 +16,7 @@ class HttpError(Exception):
     """Raised when a request can't be completed after retries are exhausted."""
 
 
-def request_json(
+def request(
     session: requests.Session,
     method: str,
     url: str,
@@ -27,7 +26,10 @@ def request_json(
     timeout: float = 10.0,
     max_retries: int = 3,
     backoff_seconds: float = 1.0,
-) -> dict[str, Any]:
+) -> requests.Response:
+    """A successful (200) response object. Raises HttpError once retries
+    are exhausted on a retryable failure, or the underlying HTTPError
+    immediately for a non-retryable status code."""
     last_error: Exception = HttpError(f"no attempts made for {url}")
 
     for attempt in range(max_retries + 1):
@@ -43,7 +45,7 @@ def request_json(
             continue
 
         if response.status_code == 200:
-            return response.json()
+            return response
 
         if response.status_code not in _RETRYABLE_STATUS_CODES:
             response.raise_for_status()
@@ -61,3 +63,47 @@ def request_json(
     raise HttpError(
         f"Request to {url} failed after {max_retries + 1} attempts"
     ) from last_error
+
+
+def request_json(
+    session: requests.Session,
+    method: str,
+    url: str,
+    *,
+    json_body: dict | None = None,
+    headers: dict | None = None,
+    timeout: float = 10.0,
+    max_retries: int = 3,
+    backoff_seconds: float = 1.0,
+):
+    return request(
+        session,
+        method,
+        url,
+        json_body=json_body,
+        headers=headers,
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_seconds=backoff_seconds,
+    ).json()
+
+
+def request_bytes(
+    session: requests.Session,
+    method: str,
+    url: str,
+    *,
+    headers: dict | None = None,
+    timeout: float = 10.0,
+    max_retries: int = 3,
+    backoff_seconds: float = 1.0,
+) -> bytes:
+    return request(
+        session,
+        method,
+        url,
+        headers=headers,
+        timeout=timeout,
+        max_retries=max_retries,
+        backoff_seconds=backoff_seconds,
+    ).content

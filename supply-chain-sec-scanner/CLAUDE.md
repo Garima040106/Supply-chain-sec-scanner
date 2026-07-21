@@ -67,11 +67,18 @@ parser -> graph builder -> vuln matcher -> heuristics -> risk scorer -> reporter
   reimplemented locally. Currently takes a flat dependency list directly
   (not graph nodes) — wiring it to run per-graph-node, and to look up
   `shortest_path` for any match, is future work (see "Current status").
-- **heuristics** (`src/sc_scanner/heuristics/`, *planned*) — Independent of
-  known-CVE data. Runs checks like: edit-distance/typosquat detection
-  against popular package names, presence of install-time scripts,
-  package age and download-count anomalies. Each heuristic produces a
-  signal, not a final verdict.
+- **heuristics** (`src/sc_scanner/heuristics/`) — Independent of known-CVE
+  data. Five independently-scored `Signal`s, combined by `scorer.py` into
+  a weighted `RiskAssessment` (never a single collapsed verdict): edit-
+  distance typosquat detection against a bundled top-1000-per-ecosystem
+  list (`typosquat.py`); npm install-hook presence and PyPI `setup.py`
+  exec/eval/network-call detection via AST (`install_scripts.py`);
+  package age, download counts, and (npm-only) maintainer-change
+  detection (`metadata.py`). Every signal module's docstring documents
+  its own false-positive tradeoffs in detail - read those before tuning
+  weights or thresholds. Not yet wired into the `scan` CLI command,
+  consistent with the vuln matcher and graph builder (see "Current
+  status").
 - **risk scorer** (`src/sc_scanner/scoring/`, *planned*) — Combines vuln
   matches and heuristic signals per package into one risk score/severity,
   and rolls those up into a project-level summary.
@@ -86,21 +93,27 @@ the same vocabulary without importing from each other's internals.
 
 Implemented: package skeleton, CLI entrypoint, parsers for
 `package-lock.json` (npm), `requirements.txt` (pip), and `poetry.lock`
-(Poetry); an OSV.dev vulnerability matcher (`src/sc_scanner/vuln/`); and
-the dependency graph builder (`src/sc_scanner/graph/`) covering both
-lockfile parsing (npm, Poetry) and best-effort one-level resolution for
-plain manifests (`requirements.txt` via PyPI, `package.json` via the npm
+(Poetry); an OSV.dev vulnerability matcher (`src/sc_scanner/vuln/`); the
+dependency graph builder (`src/sc_scanner/graph/`) covering both lockfile
+parsing (npm, Poetry) and best-effort one-level resolution for plain
+manifests (`requirements.txt` via PyPI, `package.json` via the npm
 registry — `package.json` parsing exists only inside the graph package
-for now, not as a registered CLI-facing manifest parser). Every stage has
-unit tests (parsers/graph builders against fixture files, network clients
-against mocked responses); the whole pipeline has also been smoke-tested
-against the real OSV/PyPI/npm APIs at least once during development.
+for now, not as a registered CLI-facing manifest parser); and the
+malicious-package heuristics layer (`src/sc_scanner/heuristics/`) —
+typosquat detection, install-script analysis, and metadata anomalies,
+combined into a weighted `RiskAssessment`. Every stage has unit tests
+(parsers/graph builders/heuristics against fixture files and crafted
+inputs, network clients against mocked responses); the whole pipeline has
+also been smoke-tested against the real OSV/PyPI/npm APIs at least once
+during development.
 
-Not yet done: the graph builder and vuln matcher aren't wired together
-(nothing yet calls `shortest_path` with a matched vulnerability's node as
-the target) or into the `scan` CLI command, which still only discovers
-manifests and prints the flat parsed dependency list. Heuristics, risk
-scoring, and HTML reporting are also not implemented yet.
+Not yet done: the graph builder, vuln matcher, and heuristics layer
+aren't wired together or into the `scan` CLI command, which still only
+discovers manifests and prints the flat parsed dependency list. In
+particular, nothing yet calls `shortest_path` with a matched
+vulnerability's node as the target. Risk scoring that combines vuln
+matches *with* heuristic signals (as opposed to each producing its own
+separate score) and HTML reporting are also not implemented yet.
 
 ## File layout
 
@@ -119,7 +132,7 @@ supply-chain-sec-scanner/
 │       │   ├── npm.py          # package-lock.json (lockfileVersion 2/3, "packages" format)
 │       │   ├── pip.py          # requirements.txt (pinned "==" entries)
 │       │   └── poetry.py       # poetry.lock (TOML, [[package]] tables)
-│       ├── http.py             # shared retrying HTTP-JSON request() used by every API client
+│       ├── http.py             # shared retrying request()/request_json()/request_bytes()
 │       ├── cache.py            # generic on-disk JSON cache (DiskCache), shared too
 │       ├── graph/
 │       │   ├── __init__.py
@@ -133,7 +146,16 @@ supply-chain-sec-scanner/
 │       │   ├── models.py       # Severity, AffectedRange, Vulnerability, MatchResult
 │       │   ├── client.py       # OSVClient: querybatch + vulns/{id}
 │       │   └── matcher.py      # match(dependencies) -> list[MatchResult]
-│       ├── heuristics/          # [planned] typosquat / install-script / anomaly checks
+│       ├── heuristics/
+│       │   ├── __init__.py
+│       │   ├── models.py       # Signal, SignalType, RiskAssessment
+│       │   ├── typosquat.py    # edit distance vs. bundled top-1000-per-ecosystem lists
+│       │   ├── install_scripts.py  # npm hasInstallScript; PyPI setup.py AST scan
+│       │   ├── metadata.py     # package age, download counts, npm maintainer change
+│       │   ├── scorer.py       # combine(signals) -> RiskAssessment, documented weights
+│       │   └── data/
+│       │       ├── top-npm-packages.txt   # ~1000 names, ranked (see typosquat.py docstring)
+│       │       └── top-pypi-packages.txt  # ~1000 names, ranked by real download counts
 │       ├── scoring/             # [planned] risk scorer combining vuln + heuristic signals
 │       └── report/              # [planned] CLI table + HTML report renderers
 └── tests/
@@ -157,7 +179,11 @@ supply-chain-sec-scanner/
     ├── test_npm_lock_graph.py
     ├── test_poetry_lock_graph.py
     ├── test_pypi_resolver.py
-    └── test_npm_resolver.py
+    ├── test_npm_resolver.py
+    ├── test_typosquat.py
+    ├── test_install_scripts.py
+    ├── test_metadata_heuristics.py
+    └── test_heuristic_scorer.py
 ```
 
 ## Tooling
@@ -174,17 +200,30 @@ supply-chain-sec-scanner/
   `tomllib`, added in 3.11).
 - **External data sources**: [OSV.dev](https://osv.dev) (vulnerabilities),
   [PyPI JSON API](https://warehouse.pypa.io/api-reference/json.html)
-  (Python package metadata/releases), and the
-  [npm registry](https://registry.npmjs.org) (npm package metadata).
-  Every client caches responses to disk under `~/.cache/sc-scanner/<source>/`
-  by default (`osv/`, `pypi/`, `npm-registry/`), each configurable via a
-  `cache_dir=` constructor argument. Delete the relevant directory to
-  force fresh lookups. Retry/backoff/rate-limit handling lives once in
-  `sc_scanner/http.py`, shared by all three clients.
+  (Python package metadata/releases), the
+  [npm registry](https://registry.npmjs.org) (npm package metadata — both
+  the abbreviated "corgi" packument used for dependency resolution, via
+  `get_package()`, and the full packument used by the metadata heuristics
+  for `time`/`_npmUser`, via `get_full_package()` — these are cached
+  separately since they're genuinely different response shapes for the
+  same URL), [pypistats.org](https://pypistats.org) (PyPI download
+  counts — PyPI's own JSON API doesn't expose these), and
+  [api.npmjs.org](https://api.npmjs.org) (npm download counts). Every
+  client caches responses to disk under `~/.cache/sc-scanner/<source>/` by
+  default, each configurable via a `cache_dir=` constructor argument.
+  Delete the relevant directory to force fresh lookups. Retry/backoff/
+  rate-limit handling lives once in `sc_scanner/http.py`, shared by every
+  client.
 - Version-range correctness is delegated rather than reimplemented:
   `packaging` for PEP 440 (PyPI) version ordering/specifiers, `node-semver`
   for npm-style ranges (caret/tilde/hyphen/etc). Both are already
   full, well-tested implementations of genuinely fiddly logic.
+- The bundled top-package lists (`heuristics/data/`) are static snapshots,
+  not live data — PyPI's is current download-count-ranked data
+  (hugovk/top-pypi-packages); npm's is a 2019 dependency-graph-rank
+  snapshot (Meyond/npm-top-1000-packages), which is stale on exact
+  ranking but the *names* of top packages change slowly. Regenerating
+  them isn't automated.
 
 ## Notes for future sessions
 
